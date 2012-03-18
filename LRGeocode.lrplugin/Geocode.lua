@@ -158,6 +158,80 @@ function scanForAddresses(context)
   return true
 end
 
+function geocodeAddress(address)
+  local urladdress = url_encode(address)
+  local url = "http://maps.googleapis.com/maps/api/geocode/xml?address=" .. urladdress .. "&sensor=false"
+  local success, results = LrTasks.pcall(parse_georesult, url)
+
+  if success == false then
+    return nil
+  end
+
+  return LrFunctionContext.callWithContext("selectAddress", function(context, results)
+    local f = LrView.osFactory()
+    local properties = LrBinding.makePropertyTable(context)
+    if #results > 0 then
+      properties.result = 1
+    else
+      properties.result = 0
+    end
+    properties.address = address
+
+    local ui = {
+      spacing = f:control_spacing(),
+      bind_to_object = properties,
+      f:static_text {
+        title = "Select the correct address for " .. address .. ":"
+      },
+    }
+
+    for i = 1, #results do
+      table.insert(ui, f:radio_button {
+        title = results[i].address,
+        value = LrView.bind "result",
+        checked_value = i,
+      })
+    end
+
+    table.insert(ui, f:radio_button {
+      title = "Don't geocode this address",
+      value = LrView.bind "result",
+      checked_value = 0,
+    })
+
+    table.insert(ui, f:radio_button {
+      title = "Search again with this address:",
+      value = LrView.bind "result",
+      checked_value = -1,
+    })
+
+    table.insert(ui, f:edit_field {
+      value = LrView.bind "address",
+      enabled = LrBinding.keyEquals("result", -1),
+      width_in_chars = 30,
+      fill_horizontal = 1,
+    })
+
+    local answer = LrDialogs.presentModalDialog({
+      title = "Select correct address",
+      contents = f:column(ui),
+    })
+
+    if answer ~= "ok" then
+      mainProgress:cancel()
+      return nil
+    end
+
+    if properties.result == 0 then
+      return nil
+    elseif properties.result == -1 then
+      return geocodeAddress(properties.address)
+    else
+      return results[properties.result]
+    end
+  end, results)
+end
+
 function geocodeAddresses(context)
   local progress = LrProgressScope({
     caption = "Geocoding addresses",
@@ -169,59 +243,11 @@ function geocodeAddresses(context)
   local pos = 0
   for address, data in pairs(new_addresses) do
     pos = pos + 1
-    urladdress = url_encode(address)
-    local url = "http://maps.googleapis.com/maps/api/geocode/xml?address=" .. urladdress .. "&sensor=false"
-    local success, results = LrTasks.pcall(parse_georesult, url)
-    if success then
-      if #results > 0 then
-        local result = LrFunctionContext.callWithContext("selectAddress", function(context, results)
-          local f = LrView.osFactory()
-          local properties = LrBinding.makePropertyTable(context)
-          properties.result = 1
+    local result = geocodeAddress(address)
 
-          local ui = {
-            spacing = f:control_spacing(),
-            bind_to_object = properties,
-            f:static_text {
-              title = "Select the correct address for " .. address .. ":"
-            },
-            f:radio_button {
-              title = "None of these addresses are correct",
-              value = LrView.bind "result",
-              checked_value = 0,
-            }
-          }
-
-          for i = 1, #results do
-            table.insert(ui, f:radio_button {
-              title = results[i].address,
-              value = LrView.bind "result",
-              checked_value = i,
-            })
-          end
-
-          local answer = LrDialogs.presentModalDialog({
-            title = "Select correct address",
-            contents = f:column(ui),
-          })
-
-          if answer ~= "ok" then
-            mainProgress:cancel()
-            return nil
-          end
-
-          if properties.result == 0 then
-            return nil
-          end
-
-          return results[properties.result]
-        end, results)
-
-        if result then
-          data.address = result.address
-          data.gps = result.gps
-        end
-      end
+    if result then
+      data.address = result.address
+      data.gps = result.gps
     end
 
     progress:setPortionComplete(pos, new_address_count)
@@ -261,7 +287,8 @@ function performUpdates(context)
     end
   end
 
-  LrDialogs.message("GPS data updated for " .. change_count .. " photos")
+  LrDialogs.message("GPS data updated for " .. change_count .. " of " ..
+                    #photos_to_update .. " photos")
 end
 
 function updatePhotos(context)
