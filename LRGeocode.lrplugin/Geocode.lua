@@ -175,22 +175,15 @@ function geocodeAddresses(context)
     if success then
       if #results > 0 then
         local result = LrFunctionContext.callWithContext("selectAddress", function(context, results)
-          if #results == 1 then
-            return results[1]
-          end
-
           local f = LrView.osFactory()
           local properties = LrBinding.makePropertyTable(context)
-          properties.result = 0
+          properties.result = 1
 
           local ui = {
             spacing = f:control_spacing(),
             bind_to_object = properties,
             f:static_text {
-              title = "Multiple matches were found for " .. address
-            },
-            f:static_text {
-              title = "Select the correct address:"
+              title = "Select the correct address for " .. address .. ":"
             },
             f:radio_button {
               title = "None of these addresses are correct",
@@ -267,6 +260,8 @@ function performUpdates(context)
       error("Operation canceled")
     end
   end
+
+  LrDialogs.message("GPS data updated for " .. change_count .. " photos")
 end
 
 function updatePhotos(context)
@@ -300,7 +295,12 @@ LrTasks.startAsyncTask(function()
     mainProgress:setPortionComplete(5, 100)
 
     if LrFunctionContext.callWithContext("scanForAddresses", scanForAddresses) == false
-       or mainProgress:isCanceled() or #photos_to_update == 0 then
+       or mainProgress:isCanceled() then
+      return
+    end
+
+    if #photos_to_update == 0 then
+      LrDialogs.message("All photos with location information already have GPS data")
       return
     end
 
